@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>物资价格分析系统（柱状图版）</title>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body { font-family: Arial; padding: 20px; background:#f5f6fa; }
+.container { background:#fff; padding:20px; border-radius:10px; }
+select, input { padding:6px; margin:10px 5px; }
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h2>📊 物资价格分析（柱状图）</h2>
+
+<input type="file" id="fileInput" multiple accept=".xlsx,.xls">
+
+<br>
+
+物资：
+<select id="material"></select>
+
+规格：
+<select id="spec"></select>
+
+采购地：
+<select id="source">
+    <option value="全部">全部</option>
+    <option value="国内">国内</option>
+    <option value="属地">属地</option>
+</select>
+
+<canvas id="chart" width="900" height="400"></canvas>
+
+</div>
+
+<script>
+
+let allData = [];
+let chart;
+
+// 上传
+document.getElementById('fileInput').addEventListener('change', handleFiles);
+
+function handleFiles(e) {
+    allData = [];
+
+    const files = e.target.files;
+
+    Array.from(files).forEach(file => {
+        const reader = new FileReader();
+
+        reader.onload = function(evt) {
+            const data = new Uint8Array(evt.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+
+            workbook.SheetNames.forEach(sheetName => {
+
+                let source = sheetName.includes("国内") ? "国内" : "属地";
+
+                const sheet = workbook.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(sheet, {header:1});
+
+                parseSheet(rows, file.name, source);
+            });
+
+            initSelect();
+        };
+
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+
+// 解析（第8列单价）
+function parseSheet(rows, fileName, source) {
+
+    let monthMatch = fileName.match(/(\d+)月份/);
+    let month = monthMatch ? parseInt(monthMatch[1]) : 0;
+
+    rows.forEach(row => {
+
+        let name = row[1];
+        let spec = row[2];
+
+        if (!name || name==="合计" || name==="总计") return;
+
+        let price = Number(String(row[7]).replace(/,/g, ""));
+
+        if (!isNaN(price) && price > 10) {
+
+            allData.push({
+                name,
+                spec,
+                source,
+                price,
+                month
+            });
+
+        }
+
+    });
+}
+
+
+// 初始化
+function initSelect() {
+
+    let materials = [...new Set(allData.map(d=>d.name))];
+
+    let matSel = document.getElementById("material");
+    matSel.innerHTML="";
+
+    materials.forEach(m=>{
+        let opt=document.createElement("option");
+        opt.value=m;
+        opt.text=m;
+        matSel.appendChild(opt);
+    });
+
+    matSel.onchange = updateSpec;
+
+    updateSpec();
+}
+
+
+// 规格联动
+function updateSpec() {
+
+    let mat = document.getElementById("material").value;
+
+    let specs = [...new Set(
+        allData.filter(d=>d.name===mat).map(d=>d.spec)
+    )];
+
+    let specSel = document.getElementById("spec");
+    specSel.innerHTML="";
+
+    specs.forEach(s=>{
+        let opt=document.createElement("option");
+        opt.value=s;
+        opt.text=s;
+        specSel.appendChild(opt);
+    });
+
+    specSel.onchange = drawChart;
+    document.getElementById("source").onchange = drawChart;
+
+    drawChart();
+}
+
+
+// ⭐⭐⭐ 核心：同月多柱（正确实现）⭐⭐⭐
+function drawChart() {
+
+    let mat = document.getElementById("material").value;
+    let spec = document.getElementById("spec").value;
+    let source = document.getElementById("source").value;
+
+    let filtered = allData.filter(d=>{
+        return d.name===mat &&
+               d.spec===spec &&
+               (source==="全部" || d.source===source);
+    });
+
+    // 👉 按月份排序
+    filtered.sort((a,b)=>a.month - b.month);
+
+    let labels = [];
+    let prices = [];
+
+    // ⭐ 核心：每条数据单独成为一个柱子（重复月份）
+    filtered.forEach(d=>{
+        labels.push(d.month + "月");
+        prices.push(d.price);
+    });
+
+    if(chart) chart.destroy();
+
+    chart = new Chart(document.getElementById('chart'), {
+        type:'bar',
+        data:{
+            labels: labels,
+            datasets:[{
+                label: mat + " - " + spec + " - " + source,
+                data: prices,
+                barPercentage: 0.3,
+                categoryPercentage: 1.0
+            }]
+        },
+        options:{
+            scales:{
+                y:{
+                    beginAtZero:false
+                }
+            }
+        }
+    });
+}
+
+</script>
+
+</body>
+</html>
